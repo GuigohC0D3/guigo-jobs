@@ -18,8 +18,9 @@ from textual.widgets import (
     Label,
     ListItem,
     ListView,
+    RadioButton,
+    RadioSet,
     Rule,
-    Select,
     Static,
     Switch,
     TabbedContent,
@@ -93,14 +94,29 @@ Input:focus {
     border: tall #58a6ff;
 }
 
-Select {
-    background: #161b22;
-    border: tall #30363d;
-    height: 3;
+RadioSet {
+    border: none;
+    background: transparent;
+    height: auto;
+    padding: 0;
+    margin-bottom: 1;
 }
 
-Select:focus {
-    border: tall #58a6ff;
+RadioSet > RadioButton {
+    background: transparent;
+    color: #8b949e;
+    border: none;
+    padding: 0 1 0 0;
+}
+
+RadioSet > RadioButton.-on {
+    color: #58a6ff;
+    text-style: bold;
+    background: transparent;
+}
+
+RadioSet:focus-within > RadioButton.-on {
+    color: #58a6ff;
 }
 
 Switch {
@@ -523,14 +539,11 @@ class GuigoTUI(App[None]):
                 yield Label("Technologies", classes="s-label")
                 yield Input(placeholder="react, fastapi", id="in-tech")
                 yield Label("Seniority", classes="s-label")
-                yield Select(
-                    options=[
-                        ("Junior", "junior"),
-                        ("Mid", "mid"),
-                        ("Senior", "senior"),
-                        ("Any", "any"),
-                    ],
-                    value="junior",
+                yield RadioSet(
+                    RadioButton("Junior", value=True),
+                    RadioButton("Mid"),
+                    RadioButton("Senior"),
+                    RadioButton("Any"),
                     id="in-sen",
                 )
                 yield Label("Remote only", classes="s-label")
@@ -574,6 +587,8 @@ class GuigoTUI(App[None]):
             intl.append("arbeitnow")
         if settings.enable_themuse:
             intl.append("themuse")
+        if settings.enable_linkedin:
+            intl.append("linkedin")
 
         br = ["gupy"] if settings.enable_gupy else []
 
@@ -605,6 +620,7 @@ class GuigoTUI(App[None]):
     def _build_providers(self):
         from app.providers.arbeitnow import ArbeitnowProvider
         from app.providers.gupy import GupyProvider
+        from app.providers.linkedin import LinkedInProvider
         from app.providers.remoteok import RemoteOKProvider
         from app.providers.remotive import RemotiveProvider
         from app.providers.themuse import TheMuseProvider
@@ -618,6 +634,8 @@ class GuigoTUI(App[None]):
             intl.append(ArbeitnowProvider())
         if settings.enable_themuse:
             intl.append(TheMuseProvider())
+        if settings.enable_linkedin:
+            intl.append(LinkedInProvider())
 
         br = [GupyProvider()] if settings.enable_gupy else []
 
@@ -647,14 +665,17 @@ class GuigoTUI(App[None]):
     def _get_filters(self) -> SearchFilters:
         kw_raw = self.query_one("#in-kw", Input).value
         tech_raw = self.query_one("#in-tech", Input).value
-        sen_val = self.query_one("#in-sen", Select).value
         remote = self.query_one("#in-remote", Switch).value
         days_raw = self.query_one("#in-days", Input).value
+
+        _SEN_OPTIONS = [SeniorityLevel.JUNIOR, SeniorityLevel.MID, SeniorityLevel.SENIOR, SeniorityLevel.ANY]
+        pressed = self.query_one("#in-sen", RadioSet).pressed_index
+        seniority = _SEN_OPTIONS[pressed] if pressed is not None else SeniorityLevel.JUNIOR
 
         return SearchFilters(
             keywords=[k.strip() for k in kw_raw.split(",") if k.strip()],
             technologies=[t.strip() for t in tech_raw.split(",") if t.strip()],
-            seniority=SeniorityLevel(sen_val) if sen_val is not Select.BLANK else SeniorityLevel.JUNIOR,
+            seniority=seniority,
             remote_only=remote,
             max_days_old=int(days_raw) if days_raw.strip().isdigit() else None,
         )
