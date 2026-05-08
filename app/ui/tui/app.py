@@ -27,6 +27,7 @@ from textual.widgets import (
 )
 
 from app.models.job import Job, SearchFilters, SeniorityLevel
+from app.core.config import settings
 from app.services.export import ExportService
 from app.services.search import SearchService
 from app.storage.favorites import FavoritesStorage
@@ -215,6 +216,45 @@ DataTable > .datatable--even-row {
 
 DataTable > .datatable--odd-row {
     background: #0d1117;
+}
+
+/* ── Country quick-pick ────────────────────────── */
+
+#country-row {
+    layout: horizontal;
+    height: auto;
+    margin-top: 1;
+}
+
+.region-btn {
+    width: 1fr;
+    border: solid #30363d;
+    background: #161b22;
+    color: #8b949e;
+    margin-right: 1;
+    height: 3;
+}
+
+.region-btn:last-of-type {
+    margin-right: 0;
+}
+
+.region-btn.-active-region {
+    background: #0d1f36;
+    color: #58a6ff;
+    border: solid #58a6ff;
+    text-style: bold;
+}
+
+#sources-label {
+    color: #484f58;
+    height: 1;
+    margin-top: 2;
+}
+
+#sources-info {
+    color: #30363d;
+    height: auto;
 }
 
 /* ── Job Detail Modal ──────────────────────────── */
@@ -471,6 +511,7 @@ class GuigoTUI(App[None]):
         self._history = HistoryStorage()
         self._export_svc = ExportService()
         self._jobs: list[Job] = []
+        self._region: str = "global"  # "global" | "brazil" | "both"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -496,6 +537,13 @@ class GuigoTUI(App[None]):
                 yield Switch(value=True, id="in-remote")
                 yield Label("Max days old", classes="s-label")
                 yield Input(placeholder="30", value="30", id="in-days")
+                yield Label("Region", classes="s-label")
+                with Horizontal(id="country-row"):
+                    yield Button("🌐 Global", id="btn-region-global", classes="region-btn -active-region")
+                    yield Button("🇧🇷 Brasil", id="btn-region-brazil", classes="region-btn")
+                    yield Button("⊕ Both", id="btn-region-both", classes="region-btn")
+                yield Label("Sources", classes="s-label", id="sources-label")
+                yield Static(self._sources_text(), id="sources-info")
                 yield Button("⌕  SEARCH", id="btn-search")
             with Vertical(id="content"):
                 yield Static("[#484f58]Ready — set filters and search[/#484f58]", id="status")
@@ -510,9 +558,86 @@ class GuigoTUI(App[None]):
 
     def on_mount(self) -> None:
         table = self.query_one("#hist-table", DataTable)
-        table.add_columns("Date", "Keywords", "Seniority", "Results")
+        table.add_columns("Date", "Keywords", "Seniority", "Region", "Results")
         table.cursor_type = "row"
         self.query_one("#in-kw", Input).focus()
+
+    # ── Region ─────────────────────────────────────────────────────────────
+
+    def _sources_text(self) -> str:
+        intl = []
+        if settings.enable_remoteok:
+            intl.append("remoteok")
+        if settings.enable_remotive:
+            intl.append("remotive")
+        if settings.enable_arbeitnow:
+            intl.append("arbeitnow")
+        if settings.enable_themuse:
+            intl.append("themuse")
+
+        br = ["gupy"] if settings.enable_gupy else []
+
+        if self._region == "brazil":
+            active = br
+        elif self._region == "global":
+            active = intl
+        else:
+            active = intl + br
+
+        return "  ".join(f"[#30363d]{s}[/#30363d]" for s in active) or "[#484f58]none[/#484f58]"
+
+    def _set_region(self, region: str) -> None:
+        self._region = region
+        self.query_one("#sources-info", Static).update(self._sources_text())
+
+        for btn_id, label, reg in [
+            ("btn-region-global", "🌐 Global", "global"),
+            ("btn-region-brazil", "🇧🇷 Brasil", "brazil"),
+            ("btn-region-both", "⊕ Both", "both"),
+        ]:
+            btn = self.query_one(f"#{btn_id}", Button)
+            btn.label = label
+            if reg == region:
+                btn.add_class("-active-region")
+            else:
+                btn.remove_class("-active-region")
+
+    def _build_providers(self):
+        from app.providers.arbeitnow import ArbeitnowProvider
+        from app.providers.gupy import GupyProvider
+        from app.providers.remoteok import RemoteOKProvider
+        from app.providers.remotive import RemotiveProvider
+        from app.providers.themuse import TheMuseProvider
+
+        intl = []
+        if settings.enable_remoteok:
+            intl.append(RemoteOKProvider())
+        if settings.enable_remotive:
+            intl.append(RemotiveProvider())
+        if settings.enable_arbeitnow:
+            intl.append(ArbeitnowProvider())
+        if settings.enable_themuse:
+            intl.append(TheMuseProvider())
+
+        br = [GupyProvider()] if settings.enable_gupy else []
+
+        if self._region == "brazil":
+            return br
+        elif self._region == "global":
+            return intl
+        return intl + br
+
+    @on(Button.Pressed, "#btn-region-global")
+    def on_region_global(self) -> None:
+        self._set_region("global")
+
+    @on(Button.Pressed, "#btn-region-brazil")
+    def on_region_brazil(self) -> None:
+        self._set_region("brazil")
+
+    @on(Button.Pressed, "#btn-region-both")
+    def on_region_both(self) -> None:
+        self._set_region("both")
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -550,12 +675,14 @@ class GuigoTUI(App[None]):
     def _refresh_hist_table(self) -> None:
         table = self.query_one("#hist-table", DataTable)
         table.clear()
+        region_icons = {"global": "🌐", "brazil": "🇧🇷", "both": "⊕"}
         for rec in self._history.all()[:50]:
             kw = ", ".join(rec.filters.keywords + rec.filters.technologies) or "—"
             table.add_row(
                 rec.timestamp.strftime("%m/%d %H:%M"),
-                kw[:40],
+                kw[:35],
                 rec.filters.seniority.value,
+                region_icons.get(getattr(rec.filters, "region", "global"), "🌐"),
                 str(rec.results_count),
             )
 
@@ -584,12 +711,19 @@ class GuigoTUI(App[None]):
 
     def _start_search(self) -> None:
         filters = self._get_filters()
-        self._set_status("[#58a6ff]⟳ Searching across providers...[/#58a6ff]")
-        self._search_worker(filters)
+        providers = self._build_providers()
+        if not providers:
+            self.notify("No providers active for selected region.", severity="warning")
+            return
+        region_label = {"global": "🌐 Global", "brazil": "🇧🇷 Brasil", "both": "⊕ Both"}[self._region]
+        self._set_status(f"[#58a6ff]⟳ Searching {region_label}...[/#58a6ff]")
+        self._search_worker(filters, providers)
 
     @work(thread=True, exclusive=True)
-    def _search_worker(self, filters: SearchFilters) -> None:
-        jobs = self._search_svc.search(filters)
+    def _search_worker(self, filters: SearchFilters, providers: list) -> None:
+        from app.services.search import SearchService
+        svc = SearchService(providers=providers)
+        jobs = svc.search(filters)
         self._history.add(filters, len(jobs))
         self.call_from_thread(self._on_search_done, jobs)
 
@@ -599,14 +733,17 @@ class GuigoTUI(App[None]):
         self._refresh_hist_table()
         self.query_one("#tabs", TabbedContent).active = "tab-results"
 
+        region_label = {"global": "🌐 Global", "brazil": "🇧🇷 Brasil", "both": "⊕ Both"}[self._region]
         if jobs:
             self._set_status(
                 f"[#3fb950]{len(jobs)} jobs found[/#3fb950]  "
-                f"[#484f58]· ranked by relevance[/#484f58]"
+                f"[#484f58]· {region_label} · ranked by relevance[/#484f58]"
             )
             self.notify(f"Found {len(jobs)} jobs", severity="information")
         else:
-            self._set_status("[#f85149]No jobs found[/#f85149]  [#484f58]· try broader filters[/#484f58]")
+            self._set_status(
+                f"[#f85149]No jobs found[/#f85149]  [#484f58]· {region_label} · try broader filters[/#484f58]"
+            )
             self.notify("No jobs found", severity="warning")
 
     # ── Job selection ──────────────────────────────────────────────────────

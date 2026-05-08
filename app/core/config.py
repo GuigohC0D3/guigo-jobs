@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     enable_remotive: bool = True
     enable_arbeitnow: bool = True
     enable_themuse: bool = True
+    enable_gupy: bool = True
     enable_greenhouse: bool = False
     enable_lever: bool = False
 
