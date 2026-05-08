@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pypdf import PdfReader
+
 from app.models.job import Job, SeniorityLevel
 
 _TECHNOLOGIES: frozenset[str] = frozenset({
@@ -30,6 +32,11 @@ _TECHNOLOGIES: frozenset[str] = frozenset({
     "git", "linux", "graphql", "rest", "grpc", "kafka", "rabbitmq",
     "nginx", "celery", "figma",
 })
+
+_TECH_PATTERNS: dict[str, re.Pattern] = {
+    tech: re.compile(r"\b" + re.escape(tech) + r"\b", re.I)
+    for tech in _TECHNOLOGIES
+}
 
 _SENIORITY_PATTERNS: dict[SeniorityLevel, re.Pattern] = {
     SeniorityLevel.SENIOR: re.compile(
@@ -75,19 +82,13 @@ class ResumeService:
         )
 
     def _extract_text(self, path: Path) -> str:
-        from pypdf import PdfReader
         reader = PdfReader(str(path))
         parts = [page.extract_text() or "" for page in reader.pages]
         return "\n".join(parts)
 
     def _extract_technologies(self, text: str) -> list[str]:
-        found = []
         text_lower = text.lower()
-        for tech in sorted(_TECHNOLOGIES):
-            pattern = re.compile(r"\b" + re.escape(tech) + r"\b", re.I)
-            if pattern.search(text_lower):
-                found.append(tech)
-        return found
+        return sorted(tech for tech, pat in _TECH_PATTERNS.items() if pat.search(text_lower))
 
     def _extract_keywords(self, text: str) -> list[str]:
         words = re.findall(r"[a-zA-ZÀ-ÿ]{4,}", text.lower())
