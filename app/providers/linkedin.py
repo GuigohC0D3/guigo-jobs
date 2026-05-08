@@ -33,6 +33,7 @@ class LinkedInParser(HTMLParser):
         self._capture: str | None = None
         self._capture_tag: str | None = None
         self._in_card: bool = False
+        self._card_depth: int = 0  # rastreia divs aninhadas dentro do card
 
     def parse(self, html: str) -> list[dict[str, str]]:
         self._cards = []
@@ -40,52 +41,67 @@ class LinkedInParser(HTMLParser):
         self._capture = None
         self._capture_tag = None
         self._in_card = False
+        self._card_depth = 0
         self.feed(html)
         return self._cards
 
+    @staticmethod
+    def _cls(classes: str) -> set[str]:
+        return set(classes.split())
+
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr = dict(attrs)
-        classes = attr.get("class", "") or ""
+        cls = self._cls(attr.get("class", "") or "")
 
-        if tag == "div" and "base-card" in classes:
+        # Detecta início de card por token exato "base-card" (não substring)
+        if tag == "div" and "base-card" in cls:
             self._current = {}
             self._in_card = True
+            self._card_depth = 1
             return
 
         if not self._in_card:
             return
 
-        if tag == "a" and "base-card__full-link" in classes:
+        # Rastreia profundidade de divs aninhadas
+        if tag == "div":
+            self._card_depth += 1
+
+        if tag == "a" and "base-card__full-link" in cls:
             href = (attr.get("href") or "").split("?")[0]
             if href:
                 self._current["url"] = href
-        elif tag == "h3" and "base-search-card__title" in classes:
+        elif tag == "h3" and "base-search-card__title" in cls:
             self._capture = "title"
             self._capture_tag = "h3"
-        elif tag == "h4" and "base-search-card__subtitle" in classes:
+        elif tag == "h4" and "base-search-card__subtitle" in cls:
             self._capture = "_company_h4"
             self._capture_tag = "h4"
         elif tag == "a" and self._capture == "_company_h4":
             self._capture = "company"
             self._capture_tag = "a"
-        elif tag == "span" and "job-search-card__location" in classes:
+        elif tag == "span" and "job-search-card__location" in cls:
             self._capture = "location"
             self._capture_tag = "span"
         elif tag == "time":
             self._current["published_at"] = attr.get("datetime", "")
 
     def handle_endtag(self, tag: str) -> None:
-        # Only clear capture when the exact tag that started it closes
         if self._capture in ("title", "company", "location") and tag == self._capture_tag:
             self._capture = None
             self._capture_tag = None
         elif self._capture == "_company_h4" and tag == "h4":
             self._capture = None
             self._capture_tag = None
-        elif tag == "div" and self._in_card and self._current.get("title") and self._current.get("url"):
-            self._cards.append(dict(self._current))
-            self._in_card = False
-            self._current = {}
+
+        if tag == "div" and self._in_card:
+            self._card_depth -= 1
+            if self._card_depth == 0:
+                # Div raiz do card fechada — salva se tem os campos mínimos
+                if self._current.get("title") and self._current.get("url"):
+                    self._cards.append(dict(self._current))
+                self._in_card = False
+                self._current = {}
 
     def handle_data(self, data: str) -> None:
         if self._capture in ("title", "company", "location"):
