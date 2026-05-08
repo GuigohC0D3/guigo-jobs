@@ -496,19 +496,35 @@ class JobItem(ListItem):
         score = j.relevance_score
         sc = "#3fb950" if score >= 5 else "#e3b341" if score >= 2 else "#484f58"
 
+        cv_badge = ""
+        if j.cv_match_score > 0:
+            pct = int(j.cv_match_score)
+            cc = "#3fb950" if pct >= 70 else "#e3b341" if pct >= 40 else "#484f58"
+            cv_badge = f"  [{cc}][CV {pct}%][/{cc}]"
+
+        _SRC_COLORS = {"gupy": "#3fb950", "linkedin": "#0a66c2"}
+        src_color = _SRC_COLORS.get(j.source, "#79c0ff")
+
         line1 = (
             f"[bold #8b949e]#{self._index}[/bold #8b949e]  "
             f"[bold #e6edf3]{j.title}[/bold #e6edf3]"
-            f"  [{sc}]↑{score:.1f}[/{sc}]{fav}"
+            f"  [{sc}]↑{score:.1f}[/{sc}]{cv_badge}{fav}"
         )
 
         meta = f"[#d2a8ff]{j.company}[/#d2a8ff]  [#484f58]·[/#484f58]  [#8b949e]{j.location}[/#8b949e]"
         if j.salary:
             meta += f"  [#484f58]·[/#484f58]  [#3fb950]{j.salary}[/#3fb950]"
+        if j.published_at:
+            pub = j.published_at
+            if pub.tzinfo is None:
+                pub = pub.replace(tzinfo=timezone.utc)
+            days = (datetime.now(timezone.utc) - pub).days
+            age = f"  [#484f58]· {days}d ago[/#484f58]" if days > 0 else "  [#484f58]· today[/#484f58]"
+            meta += age
 
         tags = "  ".join(f"[#e3b341]{t}[/#e3b341]" for t in j.tags[:5])
-        src = f"[#79c0ff][{j.source}][/#79c0ff]"
-        line3 = f"{tags}  {src}" if tags else src
+        src_badge = f"[{src_color}][{j.source}][/{src_color}]"
+        line3 = f"{tags}  {src_badge}" if tags else src_badge
 
         yield Static(f"{line1}\n{meta}\n{line3}")
 
@@ -942,6 +958,12 @@ class GuigoTUI(App[None]):
         from app.services.search import SearchService
         svc = SearchService(providers=providers)
         jobs = svc.search(filters)
+
+        if self._resume:
+            resume_svc = ResumeService()
+            for job in jobs:
+                job.cv_match_score = resume_svc.score_job(job, self._resume)
+
         self._history.add(filters, len(jobs))
         self.call_from_thread(self._on_search_done, jobs)
 
@@ -952,15 +974,19 @@ class GuigoTUI(App[None]):
         self.query_one("#tabs", TabbedContent).active = "tab-results"
 
         region_label = {"global": "🌐 Global", "brazil": "🇧🇷 Brasil", "both": "⊕ Both"}[self._region]
+        cv_hint = "  [#6e40c9]· CV match active[/#6e40c9]" if self._resume else ""
+
         if jobs:
             self._set_status(
-                f"[#3fb950]{len(jobs)} jobs found[/#3fb950]  "
-                f"[#484f58]· {region_label} · ranked by relevance[/#484f58]"
+                f"[#3fb950]{len(jobs)} jobs found[/#3fb950]"
+                f"  [#484f58]· {region_label} · ranked by relevance[/#484f58]"
+                f"{cv_hint}"
             )
             self.notify(f"Found {len(jobs)} jobs", severity="information")
         else:
             self._set_status(
-                f"[#f85149]No jobs found[/#f85149]  [#484f58]· {region_label} · try broader filters[/#484f58]"
+                f"[#f85149]No jobs found[/#f85149]"
+                f"  [#484f58]· {region_label} · try broader filters[/#484f58]"
             )
             self.notify("No jobs found", severity="warning")
 
