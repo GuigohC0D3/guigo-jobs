@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import webbrowser
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from textual import on, work
@@ -30,6 +31,7 @@ from textual.widgets import (
 from app.models.job import Job, SearchFilters, SeniorityLevel
 from app.core.config import settings
 from app.services.export import ExportService
+from app.services.resume import ResumeData, ResumeService
 from app.services.search import SearchService
 from app.storage.favorites import FavoritesStorage
 from app.storage.history import HistoryStorage
@@ -273,6 +275,32 @@ DataTable > .datatable--odd-row {
     height: auto;
 }
 
+/* ── Resume section ──────────────────────────────── */
+#resume-row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#resume-status {
+    width: 1fr;
+    height: 1;
+    content-align: left middle;
+}
+
+.resume-btn {
+    width: 3;
+    height: 1;
+    border: none;
+    min-width: 3;
+    background: #21262d;
+    color: #8b949e;
+}
+
+.resume-btn:hover {
+    background: #30363d;
+    color: #e6edf3;
+}
+
 /* ── Job Detail Modal ──────────────────────────── */
 
 JobDetailModal {
@@ -393,6 +421,65 @@ ExportModal {
 
 #ex-cancel { background: #21262d; color: #8b949e; }
 #ex-cancel:hover { background: #30363d; }
+
+/* ── Resume Modal ──────────────────────────────────── */
+
+ResumeModal {
+    align: center middle;
+}
+
+#resume-box {
+    width: 56;
+    height: auto;
+    background: #161b22;
+    border: solid #30363d;
+    padding: 2 3;
+}
+
+#resume-modal-title {
+    text-align: center;
+    color: #58a6ff;
+    text-style: bold;
+    height: 2;
+    margin-bottom: 1;
+}
+
+#resume-preview {
+    height: auto;
+    min-height: 4;
+    background: #0d1117;
+    border: solid #21262d;
+    padding: 1;
+    margin-top: 1;
+    color: #8b949e;
+}
+
+#resume-top-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+#resume-bot-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+.rm-btn {
+    margin-right: 1;
+    border: none;
+}
+
+#btn-rmbrowse { background: #21262d; color: #8b949e; }
+#btn-rmbrowse:hover { background: #30363d; }
+
+#btn-rmparse { background: #1f6feb; color: #ffffff; }
+#btn-rmparse:hover { background: #388bfd; }
+
+#btn-rmuse { background: #238636; color: #ffffff; }
+#btn-rmuse:hover { background: #2ea043; }
+
+#btn-rmcancel { background: #21262d; color: #8b949e; }
+#btn-rmcancel:hover { background: #30363d; }
 """
 
 
@@ -507,12 +594,111 @@ class ExportModal(ModalScreen[Optional[str]]):
         self.dismiss(mapping.get(str(event.button.id)))
 
 
+class ResumeModal(ModalScreen["Optional[ResumeData]"]):
+    BINDINGS = [("escape", "close_modal", "Close")]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parsed: Optional[ResumeData] = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="resume-box"):
+            yield Static("Import Resume (PDF)", id="resume-modal-title")
+            yield Label("PDF file path", classes="s-label")
+            yield Input(placeholder="/path/to/resume.pdf", id="resume-path")
+            with Horizontal(id="resume-top-actions"):
+                yield Button("Browse", id="btn-rmbrowse", classes="rm-btn")
+                yield Button("Parse PDF", id="btn-rmparse", classes="rm-btn")
+            yield Static("", id="resume-preview")
+            with Horizontal(id="resume-bot-actions"):
+                yield Button("✓ Use this resume", id="btn-rmuse", classes="rm-btn", disabled=True)
+                yield Button("Cancel", id="btn-rmcancel", classes="rm-btn")
+
+    def action_close_modal(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#btn-rmcancel")
+    def on_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#btn-rmbrowse")
+    def on_browse(self) -> None:
+        self._browse_worker()
+
+    @work(thread=True)
+    def _browse_worker(self) -> None:
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.wm_attributes("-topmost", True)
+            path = filedialog.askopenfilename(
+                title="Select Resume PDF",
+                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+            )
+            root.destroy()
+            if path:
+                self.call_from_thread(self._set_path, path)
+        except Exception:
+            self.call_from_thread(
+                self.app.notify,
+                "Browse unavailable — type the path manually",
+                severity="warning",
+            )
+
+    def _set_path(self, path: str) -> None:
+        self.query_one("#resume-path", Input).value = path
+
+    @on(Button.Pressed, "#btn-rmparse")
+    def on_parse(self) -> None:
+        path_str = self.query_one("#resume-path", Input).value.strip()
+        if not path_str:
+            self.app.notify("Enter a file path first", severity="warning")
+            return
+        self._parse_worker(Path(path_str))
+
+    @work(thread=True)
+    def _parse_worker(self, path: Path) -> None:
+        try:
+            data = ResumeService().parse(path)
+            self.call_from_thread(self._on_parsed, data)
+        except FileNotFoundError:
+            self.call_from_thread(
+                self.app.notify, "File not found. Check the path.", severity="error"
+            )
+        except ValueError as e:
+            self.call_from_thread(self.app.notify, str(e), severity="warning")
+        except Exception as e:
+            self.call_from_thread(
+                self.app.notify, f"Could not read PDF: {e}", severity="error"
+            )
+
+    def _on_parsed(self, data: ResumeData) -> None:
+        self._parsed = data
+        techs = ", ".join(data.technologies[:8]) or "none detected"
+        kws = ", ".join(data.keywords[:5]) or "—"
+        preview = (
+            f"[#3fb950]✓ Parsed successfully[/#3fb950]\n"
+            f"[#8b949e]Tech:[/#8b949e] [#e3b341]{techs}[/#e3b341]\n"
+            f"[#8b949e]Keywords:[/#8b949e] [#c9d1d9]{kws}[/#c9d1d9]\n"
+            f"[#8b949e]Seniority:[/#8b949e] [#58a6ff]{data.seniority.value}[/#58a6ff]"
+        )
+        self.query_one("#resume-preview", Static).update(preview)
+        self.query_one("#btn-rmuse", Button).disabled = False
+
+    @on(Button.Pressed, "#btn-rmuse")
+    def on_use(self) -> None:
+        self.dismiss(self._parsed)
+
+
 class GuigoTUI(App[None]):
     TITLE = "Guigo — Remote Job Hunter"
     CSS = _CSS
 
     BINDINGS = [
         Binding("ctrl+s", "do_search", "Search"),
+        Binding("r", "do_resume", "Resume"),
         Binding("e", "do_export", "Export"),
         Binding("f2", "show_results", "Results"),
         Binding("f3", "show_favs", "Favorites"),
@@ -528,6 +714,7 @@ class GuigoTUI(App[None]):
         self._export_svc = ExportService()
         self._jobs: list[Job] = []
         self._region: str = "global"  # "global" | "brazil" | "both"
+        self._resume: Optional[ResumeData] = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -546,6 +733,10 @@ class GuigoTUI(App[None]):
                     RadioButton("Any"),
                     id="in-sen",
                 )
+                yield Label("Resume", classes="s-label")
+                with Horizontal(id="resume-row"):
+                    yield Static("[#484f58]✗ No resume[/#484f58]", id="resume-status")
+                    yield Button("⊕", id="btn-resume", classes="resume-btn")
                 yield Label("Remote only", classes="s-label")
                 yield Switch(value=True, id="in-remote")
                 yield Label("Max days old", classes="s-label")
@@ -813,3 +1004,36 @@ class GuigoTUI(App[None]):
             self.notify(f"Exported {len(self._jobs)} jobs → {path.name}", severity="information")
         except Exception as e:
             self.notify(f"Export failed: {e}", severity="error")
+
+    # ── Resume ─────────────────────────────────────────────────────────────
+
+    def action_do_resume(self) -> None:
+        self.push_screen(ResumeModal(), callback=self._on_resume_imported)
+
+    @on(Button.Pressed, "#btn-resume")
+    def on_resume_btn(self) -> None:
+        self.push_screen(ResumeModal(), callback=self._on_resume_imported)
+
+    def _on_resume_imported(self, data: Optional[ResumeData]) -> None:
+        if data is None:
+            return
+        self._resume = data
+
+        if data.technologies:
+            self.query_one("#in-tech", Input).value = ", ".join(data.technologies[:6])
+        if data.keywords:
+            self.query_one("#in-kw", Input).value = ", ".join(data.keywords[:3])
+
+        _SEN_OPTIONS = [SeniorityLevel.JUNIOR, SeniorityLevel.MID, SeniorityLevel.SENIOR, SeniorityLevel.ANY]
+        sen_idx = _SEN_OPTIONS.index(data.seniority) if data.seniority in _SEN_OPTIONS else 3
+        buttons = list(self.query_one("#in-sen", RadioSet).query(RadioButton))
+        if 0 <= sen_idx < len(buttons):
+            buttons[sen_idx].value = True
+
+        self.query_one("#resume-status", Static).update(
+            f"[#3fb950]✓ {data.path.name}[/#3fb950]"
+        )
+        self.notify(
+            f"Resume loaded — {len(data.technologies)} technologies, seniority: {data.seniority.value}",
+            severity="information",
+        )
