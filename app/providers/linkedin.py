@@ -31,12 +31,14 @@ class LinkedInParser(HTMLParser):
         self._cards: list[dict[str, str]] = []
         self._current: dict[str, str] = {}
         self._capture: str | None = None
+        self._capture_tag: str | None = None
         self._in_card: bool = False
 
     def parse(self, html: str) -> list[dict[str, str]]:
         self._cards = []
         self._current = {}
         self._capture = None
+        self._capture_tag = None
         self._in_card = False
         self.feed(html)
         return self._cards
@@ -59,20 +61,27 @@ class LinkedInParser(HTMLParser):
                 self._current["url"] = href
         elif tag == "h3" and "base-search-card__title" in classes:
             self._capture = "title"
+            self._capture_tag = "h3"
         elif tag == "h4" and "base-search-card__subtitle" in classes:
             self._capture = "_company_h4"
+            self._capture_tag = "h4"
         elif tag == "a" and self._capture == "_company_h4":
             self._capture = "company"
+            self._capture_tag = "a"
         elif tag == "span" and "job-search-card__location" in classes:
             self._capture = "location"
+            self._capture_tag = "span"
         elif tag == "time":
             self._current["published_at"] = attr.get("datetime", "")
 
     def handle_endtag(self, tag: str) -> None:
-        if self._capture in ("title", "company", "location") and tag in ("h3", "a", "span"):
+        # Only clear capture when the exact tag that started it closes
+        if self._capture in ("title", "company", "location") and tag == self._capture_tag:
             self._capture = None
+            self._capture_tag = None
         elif self._capture == "_company_h4" and tag == "h4":
             self._capture = None
+            self._capture_tag = None
         elif tag == "div" and self._in_card and self._current.get("title") and self._current.get("url"):
             self._cards.append(dict(self._current))
             self._in_card = False
