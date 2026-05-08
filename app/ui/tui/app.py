@@ -639,31 +639,16 @@ class ResumeModal(ModalScreen["Optional[ResumeData]"]):
 
     @on(Button.Pressed, "#btn-rmbrowse")
     def on_browse(self) -> None:
-        self._browse_worker()
-
-    @work(thread=True)
-    def _browse_worker(self) -> None:
+        import os
+        home = Path.home()
         try:
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            try:
-                root.withdraw()
-                root.wm_attributes("-topmost", True)
-                path = filedialog.askopenfilename(
-                    title="Select Resume PDF",
-                    filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-                )
-            finally:
-                root.destroy()
-            if path:
-                self.call_from_thread(self._set_path, path)
+            os.startfile(str(home))
         except Exception:
-            self.call_from_thread(
-                self.app.notify,
-                "Browse unavailable — type the path manually",
-                severity="warning",
-            )
+            pass
+        self.app.notify(
+            f"Explorer aberto em {home}  —  copie o caminho do PDF e cole acima",
+            severity="information",
+        )
 
     def _set_path(self, path: str) -> None:
         self.query_one("#resume-path", Input).value = path
@@ -684,16 +669,16 @@ class ResumeModal(ModalScreen["Optional[ResumeData]"]):
     def _parse_worker(self, path: Path) -> None:
         try:
             data = ResumeService().parse(path)
-            self.call_from_thread(self._on_parsed, data)
+            self.app.call_from_thread(self._on_parsed, data)
         except FileNotFoundError:
-            self.call_from_thread(
-                self.app.notify, "File not found. Check the path.", severity="error"
+            self.app.call_from_thread(
+                self.app.notify, "Arquivo não encontrado. Verifique o caminho.", severity="error"
             )
         except ValueError as e:
-            self.call_from_thread(self.app.notify, str(e), severity="warning")
+            self.app.call_from_thread(self.app.notify, str(e), severity="warning")
         except Exception as e:
-            self.call_from_thread(
-                self.app.notify, f"Could not read PDF: {e}", severity="error"
+            self.app.call_from_thread(
+                self.app.notify, f"Erro ao ler PDF: {e}", severity="error"
             )
 
     def _on_parsed(self, data: ResumeData) -> None:
