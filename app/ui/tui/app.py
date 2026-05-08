@@ -631,13 +631,15 @@ class ResumeModal(ModalScreen["Optional[ResumeData]"]):
             import tkinter as tk
             from tkinter import filedialog
             root = tk.Tk()
-            root.withdraw()
-            root.wm_attributes("-topmost", True)
-            path = filedialog.askopenfilename(
-                title="Select Resume PDF",
-                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-            )
-            root.destroy()
+            try:
+                root.withdraw()
+                root.wm_attributes("-topmost", True)
+                path = filedialog.askopenfilename(
+                    title="Select Resume PDF",
+                    filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+                )
+            finally:
+                root.destroy()
             if path:
                 self.call_from_thread(self._set_path, path)
         except Exception:
@@ -656,7 +658,11 @@ class ResumeModal(ModalScreen["Optional[ResumeData]"]):
         if not path_str:
             self.app.notify("Enter a file path first", severity="warning")
             return
-        self._parse_worker(Path(path_str))
+        path = Path(path_str)
+        if not path.exists():
+            self.app.notify(f"File not found: {path_str}", severity="error")
+            return
+        self._parse_worker(path)
 
     @work(thread=True)
     def _parse_worker(self, path: Path) -> None:
