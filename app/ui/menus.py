@@ -3,7 +3,6 @@ from __future__ import annotations
 import webbrowser
 from typing import Optional
 
-from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
@@ -63,11 +62,12 @@ class GuigoApp:
 
         provider_count = len(self._search_service._providers)
         progress = Progress(
-            SpinnerColumn(style="primary"),
-            TextColumn("[primary]{task.description}[/primary]"),
-            BarColumn(bar_width=30, style="secondary", complete_style="primary"),
+            SpinnerColumn(style="#00D4FF"),
+            TextColumn("[bold #00D4FF]{task.description}[/bold #00D4FF]"),
+            BarColumn(bar_width=30, style="#374151", complete_style="#00D4FF"),
             MofNCompleteColumn(),
             transient=True,
+            console=console,
         )
 
         with progress:

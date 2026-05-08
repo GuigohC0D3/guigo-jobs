@@ -1,0 +1,657 @@
+from __future__ import annotations
+
+import webbrowser
+from datetime import datetime, timezone
+from typing import Optional
+
+from textual import on, work
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    Rule,
+    Select,
+    Static,
+    Switch,
+    TabbedContent,
+    TabPane,
+)
+
+from app.models.job import Job, SearchFilters, SeniorityLevel
+from app.services.export import ExportService
+from app.services.search import SearchService
+from app.storage.favorites import FavoritesStorage
+from app.storage.history import HistoryStorage
+
+_CSS = """
+Screen {
+    background: #060d18;
+    color: #c9d1d9;
+}
+
+Header {
+    background: #0d1117;
+    color: #58a6ff;
+    text-style: bold;
+}
+
+Footer {
+    background: #0d1117;
+    color: #484f58;
+}
+
+/* ── Layout ────────────────────────────────────── */
+
+#main-layout {
+    height: 1fr;
+}
+
+/* ── Sidebar ───────────────────────────────────── */
+
+#sidebar {
+    width: 32;
+    background: #0d1117;
+    border-right: solid #21262d;
+    padding: 1 2;
+    overflow-y: auto;
+}
+
+#logo {
+    color: #58a6ff;
+    text-style: bold;
+    text-align: center;
+    height: 3;
+    content-align: center middle;
+    border-bottom: solid #21262d;
+    margin-bottom: 1;
+}
+
+.s-label {
+    color: #484f58;
+    height: 1;
+    margin-top: 1;
+}
+
+Input {
+    background: #161b22;
+    border: tall #30363d;
+    color: #e6edf3;
+    height: 3;
+}
+
+Input:focus {
+    border: tall #58a6ff;
+}
+
+Select {
+    background: #161b22;
+    border: tall #30363d;
+    height: 3;
+}
+
+Select:focus {
+    border: tall #58a6ff;
+}
+
+Switch {
+    margin: 1 0;
+    border: none;
+}
+
+#btn-search {
+    width: 100%;
+    margin-top: 2;
+    background: #238636;
+    color: #ffffff;
+    text-style: bold;
+    border: none;
+}
+
+#btn-search:hover {
+    background: #2ea043;
+}
+
+#btn-search:focus {
+    background: #2ea043;
+    border: none;
+}
+
+/* ── Content area ──────────────────────────────── */
+
+#content {
+    width: 1fr;
+    background: #060d18;
+}
+
+#status {
+    height: 1;
+    background: #0d1117;
+    border-bottom: solid #21262d;
+    padding: 0 2;
+    color: #484f58;
+}
+
+TabbedContent {
+    height: 1fr;
+}
+
+TabPane {
+    padding: 0;
+}
+
+Tab {
+    background: #0d1117;
+    color: #8b949e;
+}
+
+Tab.-active {
+    color: #58a6ff;
+    text-style: bold;
+}
+
+Tabs {
+    background: #0d1117;
+    border-bottom: solid #21262d;
+}
+
+Tabs:focus {
+    border-bottom: solid #21262d;
+}
+
+/* ── Job list ──────────────────────────────────── */
+
+#job-list, #fav-list {
+    padding: 1;
+    background: #060d18;
+}
+
+JobItem {
+    height: auto;
+    background: #0d1117;
+    border: solid #21262d;
+    padding: 1 2;
+    margin-bottom: 1;
+}
+
+JobItem.--highlight {
+    border: solid #58a6ff;
+    background: #0d1f36;
+}
+
+JobItem:focus {
+    border: solid #58a6ff;
+}
+
+/* ── History table ─────────────────────────────── */
+
+DataTable {
+    margin: 1;
+    background: #060d18;
+}
+
+DataTable > .datatable--header {
+    background: #0d1117;
+    color: #58a6ff;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #0d1f36;
+    color: #e6edf3;
+}
+
+DataTable > .datatable--even-row {
+    background: #060d18;
+}
+
+DataTable > .datatable--odd-row {
+    background: #0d1117;
+}
+
+/* ── Job Detail Modal ──────────────────────────── */
+
+JobDetailModal {
+    align: center middle;
+}
+
+#modal-box {
+    width: 80%;
+    max-height: 88%;
+    background: #161b22;
+    border: solid #30363d;
+    padding: 2 3;
+}
+
+#m-title {
+    text-style: bold;
+    color: #58a6ff;
+    height: auto;
+    margin-bottom: 1;
+}
+
+#m-company {
+    color: #d2a8ff;
+    height: auto;
+}
+
+#m-location {
+    color: #8b949e;
+    height: auto;
+}
+
+#m-salary {
+    color: #3fb950;
+    height: auto;
+    margin-bottom: 1;
+}
+
+#m-source {
+    color: #79c0ff;
+    height: auto;
+}
+
+#m-tags {
+    color: #e3b341;
+    height: auto;
+    margin-bottom: 1;
+}
+
+#m-desc {
+    color: #c9d1d9;
+    height: auto;
+    margin-bottom: 1;
+}
+
+#m-url {
+    color: #484f58;
+    height: auto;
+    margin-bottom: 2;
+}
+
+#m-actions {
+    height: auto;
+    layout: horizontal;
+}
+
+.m-btn {
+    margin-right: 1;
+    border: none;
+}
+
+#btn-browser { background: #6e40c9; color: #ffffff; }
+#btn-browser:hover { background: #8957e5; }
+
+#btn-fav { background: #9e6a03; color: #ffffff; }
+#btn-fav:hover { background: #bb8009; }
+
+#btn-fav.--favorited { background: #9e6a03; }
+
+#btn-mclose { background: #21262d; color: #8b949e; }
+#btn-mclose:hover { background: #30363d; }
+
+/* ── Export Modal ──────────────────────────────── */
+
+ExportModal {
+    align: center middle;
+}
+
+#export-box {
+    width: 38;
+    height: auto;
+    background: #161b22;
+    border: solid #30363d;
+    padding: 2 3;
+}
+
+#export-title {
+    text-align: center;
+    color: #58a6ff;
+    text-style: bold;
+    height: 2;
+    margin-bottom: 1;
+}
+
+.ex-btn {
+    width: 100%;
+    margin-bottom: 1;
+    border: none;
+}
+
+#ex-json { background: #1f6feb; color: #ffffff; }
+#ex-json:hover { background: #388bfd; }
+
+#ex-csv { background: #238636; color: #ffffff; }
+#ex-csv:hover { background: #2ea043; }
+
+#ex-txt { background: #6e40c9; color: #ffffff; }
+#ex-txt:hover { background: #8957e5; }
+
+#ex-cancel { background: #21262d; color: #8b949e; }
+#ex-cancel:hover { background: #30363d; }
+"""
+
+
+class JobItem(ListItem):
+    def __init__(self, job: Job, index: int, is_fav: bool = False) -> None:
+        super().__init__()
+        self._job = job
+        self._index = index
+        self._is_fav = is_fav
+
+    def compose(self) -> ComposeResult:
+        j = self._job
+        fav = "  [bold yellow]★[/bold yellow]" if self._is_fav else ""
+        score = j.relevance_score
+        sc = "#3fb950" if score >= 5 else "#e3b341" if score >= 2 else "#484f58"
+
+        line1 = (
+            f"[bold #8b949e]#{self._index}[/bold #8b949e]  "
+            f"[bold #e6edf3]{j.title}[/bold #e6edf3]"
+            f"  [{sc}]↑{score:.1f}[/{sc}]{fav}"
+        )
+
+        meta = f"[#d2a8ff]{j.company}[/#d2a8ff]  [#484f58]·[/#484f58]  [#8b949e]{j.location}[/#8b949e]"
+        if j.salary:
+            meta += f"  [#484f58]·[/#484f58]  [#3fb950]{j.salary}[/#3fb950]"
+
+        tags = "  ".join(f"[#e3b341]{t}[/#e3b341]" for t in j.tags[:5])
+        src = f"[#79c0ff][{j.source}][/#79c0ff]"
+        line3 = f"{tags}  {src}" if tags else src
+
+        yield Static(f"{line1}\n{meta}\n{line3}")
+
+    @property
+    def job(self) -> Job:
+        return self._job
+
+
+class JobDetailModal(ModalScreen[bool]):
+    BINDINGS = [("escape", "close_modal", "Close")]
+
+    def __init__(self, job: Job, is_fav: bool) -> None:
+        super().__init__()
+        self._job = job
+        self._is_fav = is_fav
+
+    def compose(self) -> ComposeResult:
+        j = self._job
+
+        pub_str = ""
+        if j.published_at:
+            pub = j.published_at
+            if pub.tzinfo is None:
+                pub = pub.replace(tzinfo=timezone.utc)
+            days = (datetime.now(timezone.utc) - pub).days
+            pub_str = f"  ·  {days}d ago" if days > 0 else "  ·  today"
+
+        sal_str = j.salary or "Salary not disclosed"
+        tags_str = "  ".join(j.tags) if j.tags else "—"
+        desc_str = (j.description or "No description available.").strip()
+        fav_label = "★ Unfavorite" if self._is_fav else "☆ Favorite"
+
+        with VerticalScroll(id="modal-box"):
+            yield Static(j.title, id="m-title")
+            yield Static(j.company, id="m-company")
+            yield Static(f"{j.location}{pub_str}", id="m-location")
+            yield Static(sal_str, id="m-salary")
+            yield Static(f"via {j.source}", id="m-source")
+            yield Rule()
+            yield Static(f"Tags: {tags_str}", id="m-tags")
+            yield Rule()
+            yield Static(desc_str, id="m-desc")
+            yield Static(f"URL: {j.url}", id="m-url")
+            with Horizontal(id="m-actions"):
+                yield Button(fav_label, id="btn-fav", classes="m-btn")
+                yield Button("Open in Browser", id="btn-browser", classes="m-btn")
+                yield Button("Close  [Esc]", id="btn-mclose", classes="m-btn")
+
+    def action_close_modal(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#btn-mclose")
+    def on_close(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#btn-browser")
+    def on_browser(self) -> None:
+        webbrowser.open(self._job.url)
+        self.app.notify("Opened in browser", severity="information")
+
+    @on(Button.Pressed, "#btn-fav")
+    def on_fav(self) -> None:
+        self.dismiss(True)
+
+
+class ExportModal(ModalScreen[Optional[str]]):
+    BINDINGS = [("escape", "close_modal", "Close")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="export-box"):
+            yield Static("Export Results", id="export-title")
+            yield Button("JSON", id="ex-json", classes="ex-btn")
+            yield Button("CSV", id="ex-csv", classes="ex-btn")
+            yield Button("TXT", id="ex-txt", classes="ex-btn")
+            yield Button("Cancel", id="ex-cancel", classes="ex-btn")
+
+    def action_close_modal(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed)
+    def on_button(self, event: Button.Pressed) -> None:
+        mapping = {"ex-json": "JSON", "ex-csv": "CSV", "ex-txt": "TXT"}
+        self.dismiss(mapping.get(str(event.button.id)))
+
+
+class GuigoTUI(App[None]):
+    TITLE = "Guigo — Remote Job Hunter"
+    CSS = _CSS
+
+    BINDINGS = [
+        Binding("ctrl+s", "do_search", "Search"),
+        Binding("e", "do_export", "Export"),
+        Binding("f2", "show_results", "Results"),
+        Binding("f3", "show_favs", "Favorites"),
+        Binding("f4", "show_hist", "History"),
+        Binding("q", "quit", "Quit", priority=True),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._search_svc = SearchService()
+        self._favorites = FavoritesStorage()
+        self._history = HistoryStorage()
+        self._export_svc = ExportService()
+        self._jobs: list[Job] = []
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        with Horizontal(id="main-layout"):
+            with Vertical(id="sidebar"):
+                yield Static("⬡  G U I G O", id="logo")
+                yield Label("Keywords", classes="s-label")
+                yield Input(placeholder="python, backend", id="in-kw")
+                yield Label("Technologies", classes="s-label")
+                yield Input(placeholder="react, fastapi", id="in-tech")
+                yield Label("Seniority", classes="s-label")
+                yield Select(
+                    options=[
+                        ("Junior", "junior"),
+                        ("Mid", "mid"),
+                        ("Senior", "senior"),
+                        ("Any", "any"),
+                    ],
+                    value="junior",
+                    id="in-sen",
+                )
+                yield Label("Remote only", classes="s-label")
+                yield Switch(value=True, id="in-remote")
+                yield Label("Max days old", classes="s-label")
+                yield Input(placeholder="30", value="30", id="in-days")
+                yield Button("⌕  SEARCH", id="btn-search")
+            with Vertical(id="content"):
+                yield Static("[#484f58]Ready — set filters and search[/#484f58]", id="status")
+                with TabbedContent(id="tabs"):
+                    with TabPane("Results", id="tab-results"):
+                        yield ListView(id="job-list")
+                    with TabPane("Favorites", id="tab-favs"):
+                        yield ListView(id="fav-list")
+                    with TabPane("History", id="tab-hist"):
+                        yield DataTable(id="hist-table")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one("#hist-table", DataTable)
+        table.add_columns("Date", "Keywords", "Seniority", "Results")
+        table.cursor_type = "row"
+        self.query_one("#in-kw", Input).focus()
+
+    # ── Helpers ────────────────────────────────────────────────────────────
+
+    def _set_status(self, markup: str) -> None:
+        self.query_one("#status", Static).update(markup)
+
+    def _get_filters(self) -> SearchFilters:
+        kw_raw = self.query_one("#in-kw", Input).value
+        tech_raw = self.query_one("#in-tech", Input).value
+        sen_val = self.query_one("#in-sen", Select).value
+        remote = self.query_one("#in-remote", Switch).value
+        days_raw = self.query_one("#in-days", Input).value
+
+        return SearchFilters(
+            keywords=[k.strip() for k in kw_raw.split(",") if k.strip()],
+            technologies=[t.strip() for t in tech_raw.split(",") if t.strip()],
+            seniority=SeniorityLevel(sen_val) if sen_val is not Select.BLANK else SeniorityLevel.JUNIOR,
+            remote_only=remote,
+            max_days_old=int(days_raw) if days_raw.strip().isdigit() else None,
+        )
+
+    def _populate_job_list(self, selector: str, jobs: list[Job]) -> None:
+        lv = self.query_one(selector, ListView)
+        lv.clear()
+        fav_ids = {j.id for j in self._favorites.all()}
+        for i, job in enumerate(jobs, 1):
+            lv.append(JobItem(job, i, is_fav=job.id in fav_ids))
+
+    def _refresh_fav_list(self) -> None:
+        lv = self.query_one("#fav-list", ListView)
+        lv.clear()
+        for i, job in enumerate(self._favorites.all(), 1):
+            lv.append(JobItem(job, i, is_fav=True))
+
+    def _refresh_hist_table(self) -> None:
+        table = self.query_one("#hist-table", DataTable)
+        table.clear()
+        for rec in self._history.all()[:50]:
+            kw = ", ".join(rec.filters.keywords + rec.filters.technologies) or "—"
+            table.add_row(
+                rec.timestamp.strftime("%m/%d %H:%M"),
+                kw[:40],
+                rec.filters.seniority.value,
+                str(rec.results_count),
+            )
+
+    def _open_detail(self, job: Job) -> None:
+        is_fav = self._favorites.is_favorite(job.id)
+        self.push_screen(
+            JobDetailModal(job, is_fav),
+            callback=lambda changed: self._on_detail_close(job, changed),
+        )
+
+    def _on_detail_close(self, job: Job, fav_changed: bool) -> None:
+        if fav_changed:
+            is_now_fav = self._favorites.toggle(job)
+            self.notify("Added to favorites ★" if is_now_fav else "Removed from favorites")
+            self._populate_job_list("#job-list", self._jobs)
+            self._refresh_fav_list()
+
+    # ── Search ─────────────────────────────────────────────────────────────
+
+    @on(Button.Pressed, "#btn-search")
+    def on_search_btn(self) -> None:
+        self._start_search()
+
+    def action_do_search(self) -> None:
+        self._start_search()
+
+    def _start_search(self) -> None:
+        filters = self._get_filters()
+        self._set_status("[#58a6ff]⟳ Searching across providers...[/#58a6ff]")
+        self._search_worker(filters)
+
+    @work(thread=True, exclusive=True)
+    def _search_worker(self, filters: SearchFilters) -> None:
+        jobs = self._search_svc.search(filters)
+        self._history.add(filters, len(jobs))
+        self.call_from_thread(self._on_search_done, jobs)
+
+    def _on_search_done(self, jobs: list[Job]) -> None:
+        self._jobs = jobs
+        self._populate_job_list("#job-list", jobs)
+        self._refresh_hist_table()
+        self.query_one("#tabs", TabbedContent).active = "tab-results"
+
+        if jobs:
+            self._set_status(
+                f"[#3fb950]{len(jobs)} jobs found[/#3fb950]  "
+                f"[#484f58]· ranked by relevance[/#484f58]"
+            )
+            self.notify(f"Found {len(jobs)} jobs", severity="information")
+        else:
+            self._set_status("[#f85149]No jobs found[/#f85149]  [#484f58]· try broader filters[/#484f58]")
+            self.notify("No jobs found", severity="warning")
+
+    # ── Job selection ──────────────────────────────────────────────────────
+
+    @on(ListView.Selected, "#job-list")
+    def on_job_selected(self, event: ListView.Selected) -> None:
+        if isinstance(event.item, JobItem):
+            self._open_detail(event.item.job)
+
+    @on(ListView.Selected, "#fav-list")
+    def on_fav_selected(self, event: ListView.Selected) -> None:
+        if isinstance(event.item, JobItem):
+            self._open_detail(event.item.job)
+
+    # ── Tab navigation ─────────────────────────────────────────────────────
+
+    def action_show_results(self) -> None:
+        self.query_one("#tabs", TabbedContent).active = "tab-results"
+
+    def action_show_favs(self) -> None:
+        self._refresh_fav_list()
+        self.query_one("#tabs", TabbedContent).active = "tab-favs"
+
+    def action_show_hist(self) -> None:
+        self._refresh_hist_table()
+        self.query_one("#tabs", TabbedContent).active = "tab-hist"
+
+    # ── Export ─────────────────────────────────────────────────────────────
+
+    def action_do_export(self) -> None:
+        if not self._jobs:
+            self.notify("No results to export. Run a search first.", severity="warning")
+            return
+        self.push_screen(ExportModal(), callback=self._on_export_choice)
+
+    def _on_export_choice(self, fmt: Optional[str]) -> None:
+        if not fmt:
+            return
+        try:
+            svc = self._export_svc
+            path = (
+                svc.to_json(self._jobs) if fmt == "JSON"
+                else svc.to_csv(self._jobs) if fmt == "CSV"
+                else svc.to_txt(self._jobs)
+            )
+            self.notify(f"Exported {len(self._jobs)} jobs → {path.name}", severity="information")
+        except Exception as e:
+            self.notify(f"Export failed: {e}", severity="error")

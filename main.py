@@ -1,14 +1,12 @@
 import sys
 
-from app.ui.menus import GuigoApp
+from app.ui.tui.app import GuigoTUI
 
 
 def main() -> None:
     try:
-        app = GuigoApp()
-        app.run()
+        GuigoTUI().run()
     except KeyboardInterrupt:
-        print("\n\nInterrupted. Bye!")
         sys.exit(0)
 
 

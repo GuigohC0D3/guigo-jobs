@@ -11,10 +11,10 @@ from rich.table import Table
 from rich.text import Text
 
 from app.models.job import Job
-from app.ui.theme import LOGO, LOGO_COMPACT
+from app.ui.theme import GUIGO_THEME, LOGO, LOGO_COMPACT
 
 
-console = Console(theme=None)
+console = Console(theme=GUIGO_THEME)
 
 
 def print_logo(compact: bool = False) -> None:
