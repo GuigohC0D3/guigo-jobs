@@ -721,6 +721,10 @@ class GuigoTUI(App[None]):
         with Horizontal(id="main-layout"):
             with Vertical(id="sidebar"):
                 yield Static("⬡  G U I G O", id="logo")
+                yield Label("Resume", classes="s-label")
+                with Horizontal(id="resume-row"):
+                    yield Static("[#484f58]✗ No resume[/#484f58]", id="resume-status")
+                    yield Button("⊕", id="btn-resume", classes="resume-btn")
                 yield Label("Keywords", classes="s-label")
                 yield Input(placeholder="python, backend", id="in-kw")
                 yield Label("Technologies", classes="s-label")
@@ -733,10 +737,6 @@ class GuigoTUI(App[None]):
                     RadioButton("Any"),
                     id="in-sen",
                 )
-                yield Label("Resume", classes="s-label")
-                with Horizontal(id="resume-row"):
-                    yield Static("[#484f58]✗ No resume[/#484f58]", id="resume-status")
-                    yield Button("⊕", id="btn-resume", classes="resume-btn")
                 yield Label("Remote only", classes="s-label")
                 yield Switch(value=True, id="in-remote")
                 yield Label("Max days old", classes="s-label")
