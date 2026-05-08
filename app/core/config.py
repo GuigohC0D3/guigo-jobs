@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     enable_themuse: bool = True
     enable_gupy: bool = True
     enable_greenhouse: bool = False
+    enable_linkedin: bool = True
     enable_lever: bool = False
 
     # Scoring weights

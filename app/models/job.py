@@ -40,6 +40,7 @@ class Job(BaseModel):
     source: str = ""
     favorited: bool = False
     relevance_score: float = 0.0
+    cv_match_score: float = 0.0
 
     @field_validator("description", mode="before")
     @classmethod
